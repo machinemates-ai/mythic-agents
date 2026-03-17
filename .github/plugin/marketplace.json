@@ -1,0 +1,42 @@
+{
+  "name": "mythic-agents",
+  "metadata": {
+    "description": "12-agent orchestration system for VS Code Copilot — Zeus, Athena, Apollo, Hermes, Aphrodite, Maat, Ra, Temis, Iris, Talos, Mnemosyne, Gaia. Includes 19 on-demand skills.",
+    "version": "2.7.0"
+  },
+  "owner": {
+    "name": "ils15"
+  },
+  "plugins": [
+    {
+      "name": "mythic-agents",
+      "source": ".",
+      "description": "12-agent orchestration system with conductor-delegate pipeline, TDD enforcement, and 19 domain skills.",
+      "version": "2.7.0",
+      "agents": [
+        "./agents"
+      ],
+      "skills": [
+        "./skills/agent-coordination",
+        "./skills/api-design-patterns",
+        "./skills/artifact-management",
+        "./skills/code-review-checklist",
+        "./skills/database-migration",
+        "./skills/database-optimization",
+        "./skills/docker-best-practices",
+        "./skills/fastapi-async-patterns",
+        "./skills/frontend-analyzer",
+        "./skills/internet-search",
+        "./skills/nextjs-seo-optimization",
+        "./skills/orchestration-workflow",
+        "./skills/performance-optimization",
+        "./skills/playwright-e2e-testing",
+        "./skills/prompt-improver",
+        "./skills/remote-sensing-analysis",
+        "./skills/security-audit",
+        "./skills/tdd-with-agents",
+        "./skills/web-ui-analysis"
+      ]
+    }
+  ]
+}

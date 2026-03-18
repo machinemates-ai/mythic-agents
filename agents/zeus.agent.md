@@ -89,6 +89,49 @@ You must **stop and wait for explicit user approval** at each gate. Use `agent/a
 > [!IMPORTANT]
 > Use `agent/askQuestions` at every gate. This replaces passive ⏸️ markers with actual interactive confirmation loops that block until the user responds.
 
+## 🔄 RETRY & ESCALATION PROTOCOL
+
+When a delegated agent fails or returns an incomplete result, follow this three-tier protocol:
+
+### Tier 1: Retry (Transient Failures)
+**Trigger**: Tool timeout, MCP server error, truncated response, empty result.
+**Action**: Retry the same agent with the same prompt, up to **2 retries**.
+**Example**: Iris gets `TypeError: fetch failed` → retry up to 2×.
+
+### Tier 2: Replan (Structural Failures)
+**Trigger**: Agent returns `NEEDS_REVISION` or `FAILED`, wrong files modified, scope mismatch, or 2 retries exhausted on Tier 1.
+**Action**: Hand the failure context back to **@athena** for a revised plan scoped to the failed phase only. Then re-delegate.
+```
+@athena Phase 2 failed: Hermes could not find the expected router file.
+Error: [summary]. Replan Phase 2 only — keep Phase 1 results.
+```
+
+### Tier 3: Escalate (Unrecoverable)
+**Trigger**: Replan also fails, external dependency is down, or decision requires human judgment.
+**Action**: Use `agent/askQuestions` to escalate to the user with:
+1. What failed and why
+2. What was already tried (retries + replan)
+3. Suggested manual workaround or alternative approach
+```
+agent/askQuestions:
+"⚠️ Escalation: Iris GitHub operations failed after 2 retries + replan.
+MCP server appears down. Options:
+(a) I'll use gh CLI via terminal instead
+(b) Skip GitHub operations for now
+(c) Abort this phase"
+```
+
+### Protocol Summary
+| Tier | Trigger | Action | Max Attempts |
+|------|---------|--------|-------------|
+| 1 - Retry | Transient error | Same agent, same prompt | 2 |
+| 2 - Replan | Structural failure / retries exhausted | @athena replans failed phase | 1 |
+| 3 - Escalate | Replan fails / human judgment needed | `agent/askQuestions` to user | 1 |
+
+> Never silently swallow errors. Every failure must be visible — either resolved by retry/replan or surfaced to the user.
+
+---
+
 ## 🎯 TASK ROUTING ALGORITHM
 
 **See**: AGENTS.md - "Agent Selection Guide"
@@ -134,11 +177,44 @@ Full debugging guide with 7-step process in documentation.
 - Temis examines only changed files (with security checklist)
 - YOU orchestrate without touching the bulk of codebase
 
-### 3. **Parallel Execution Coordination**
-- Launch independent agents simultaneously
-- Track progress across multiple implementers
-- Coordinate interdependent phases
-- Report status and readiness gates
+### 3. **Wave-Based Execution**
+
+Since `runSubagent` is blocking (see `docs/platform-workarounds.md`), "parallel" dispatch is actually serial. Use **waves** to batch agents with no inter-dependencies, minimizing total passes:
+
+```
+Wave 0: Planning & Research (always first)
+  @athena → plan  |  @apollo → discovery  (independent, same wave)
+
+Wave 1: Implementation (independent scopes)
+  @hermes  → backend endpoints + tests
+  @aphrodite → frontend components + tests
+  @maat    → schema/migrations
+  (all three touch different file sets — safe to batch)
+
+Wave 2: Integration (depends on Wave 1)
+  @ra → infra/deployment (needs backend + frontend artifacts)
+
+Wave 3: Review (depends on Wave 1 + 2)
+  @temis → reviews all changed files + security audit
+```
+
+**Wave rules**:
+1. All agents within a wave MUST have independent file scopes
+2. A wave starts only after ALL agents in the previous wave complete
+3. If any agent in a wave fails, apply the Retry & Escalation Protocol before advancing
+4. Announce each wave before dispatching:
+
+```
+🌊 WAVE 1 — Implementation (3 agents, independent scopes)
+  - @hermes   → src/api/**   (backend)
+  - @aphrodite → src/components/** (frontend)
+  - @maat     → alembic/**   (database)
+Dispatching sequentially. Temis reviews after all three complete.
+```
+
+**Adaptive waves**: Not every feature needs all 4 waves. Skip waves that don't apply:
+- Bug fix: Wave 0 (athena) → Wave 1 (single implementer) → Wave 3 (temis)
+- Hotfix: Skip waves entirely → @talos direct
 
 ### 4. **Structured Handoffs**
 - Receive plans from Planner
@@ -206,44 +282,45 @@ Full debugging guide with 7-step process in documentation.
 
 ## Orchestration Workflow
 
-### Phase-Based Execution with Artifact Gates
+### Wave-Based Execution with Artifact Gates
 
 ```
-Phase 1: Planning & Research
-  ├─ @athena → presents plan in chat (optional PLAN artifact only if requested)
-  ├─ @apollo (parallel discovery + docs/GitHub evidence)
-  └─ ⏸️ GATE 1: User reviews plan in chat → approves or requests changes
+Wave 0: Planning & Research
+  @athena → presents plan in chat (optional PLAN artifact only if requested)
+  @apollo (parallel discovery + docs/GitHub evidence)
+  GATE 1: User reviews plan in chat → approves or requests changes
 
-Phase 2: Implementation (PARALLEL — declare explicitly)
-  ╭─ @hermes  → backend + tests  → IMPL-phase2-hermes.md
-  ├─ @aphrodite → frontend       → IMPL-phase2-aphrodite.md
-  ╰─ @maat    → schema/migrations → IMPL-phase2-maat.md
-  (all three run simultaneously when scopes don’t overlap)
+Wave 1: Implementation (sequential dispatch, independent scopes)
+  @hermes  → backend + tests  → IMPL-wave1-hermes.md
+  @aphrodite → frontend       → IMPL-wave1-aphrodite.md
+  @maat    → schema/migrations → IMPL-wave1-maat.md
+  (dispatched sequentially; scopes don't overlap)
 
-Phase 3: Quality Gate
-  └─ @temis → reviews all IMPL artifacts → REVIEW-<feature>.md
-      └─ ⏸️ GATE 2: User reviews REVIEW artifact + Human Review Focus items
+Wave 2: Integration (optional)
+  @ra → infra changes if needed
 
-Phase 4: Deployment (optional)
-  └─ @ra → deploy to staging/prod
+Wave 3: Quality Gate
+  @temis → reviews all changed files → REVIEW-<feature>.md
+      GATE 2: User reviews REVIEW artifact + Human Review Focus items
 
-⏸️ GATE 3: User executes git commit
+GATE 3: User executes git commit
 ```
 
-### Parallel Execution Declaration
+### Wave Execution Announcement
 
-When dispatching multiple workers, **always announce**:
+When dispatching a wave, **always announce**:
 
 ```
-🔀 PARALLEL EXECUTION — Phase 2
-Running simultaneously (independent scopes):
+🌊 WAVE 1 — Implementation (3 agents)
+Dispatching sequentially (independent scopes):
 - @hermes   → backend endpoints + tests
 - @aphrodite → frontend components
 - @maat     → database migration
 
 All three will produce IMPL artifacts.
-Temis reviews after all three complete.
+Temis reviews in Wave 3 after all complete.
 ```
+
 
 ### Context Conservation
 - **Research agents** return summaries, not 50KB of raw code

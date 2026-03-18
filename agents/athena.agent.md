@@ -85,6 +85,28 @@ Questions:
 
 Only after explicit "yes" → delegate to @zeus with plan context.
 
+## Plan Persistence
+
+Plans presented in chat are ephemeral — they vanish if the session is lost or context overflows. After the user approves a plan, **persist it to session memory** so downstream agents and future sessions can recover it:
+
+```
+# After user approves the plan:
+memory create /memories/session/plan-<feature-slug>.md <plan content>
+```
+
+**Rules**:
+- Write to `/memories/session/` (scoped to current conversation, auto-cleaned)
+- Use kebab-case feature slug: `plan-jwt-auth.md`, `plan-dashboard-redesign.md`
+- Include the full phase breakdown, agent assignments, and file lists
+- Add a `## Status` section at the top: `Approved | In Progress | Completed`
+
+**Recovery**: If Zeus or any agent loses context mid-feature, they can read the persisted plan:
+```
+memory view /memories/session/plan-<feature-slug>.md
+```
+
+This enables phase-by-phase execution across multiple chat sessions without re-planning.
+
 ## When to Use Apollo
 
 - Complex pattern discovery (find all X across Y modules)
